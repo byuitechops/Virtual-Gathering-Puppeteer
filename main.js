@@ -1,5 +1,8 @@
 const puppeteer = require('puppeteer');
-const auth = require('./auth.json')
+const d3 = require('d3-dsv')
+const prompt = require('prompt')
+const fs = require('fs')
+const path = require('path')
 
 const subdomain = 'byui'
 const sels = {
@@ -23,27 +26,15 @@ const sels = {
     save: 'button[primary]',
 }
 
-async function login(page){
+async function login(page,auth){
     await page.goto(`https://${subdomain}.brightspace.com/d2l/login?noredirect=true`)
     await page.type(sels.loginUsername,auth.username),
     await page.type(sels.loginPassword,auth.password)
     await page.click(sels.loginButton)
-    await page.waitForSelector(sels.courseSearchButton)
-}
-
-async function goToCourse(page,courseName){
-    await page.click(sels.courseSearchButton)
     await Promise.all([
-        page.waitForSelector(sels.results),
-        page.type(sels.courseSeacrch,courseName+'\n')
+        page.waitForSelector(sels.courseSearchButton),
+        page.waitForNavigation()
     ])
-    
-    let numResults = await page.$eval(sels.results, ul => ul.children.length )
-    
-    if(numResults != 1){
-        throw new Error('Couldn\'t find the course')
-    }
-    
 }
 
 async function selectVirtualGathering(page){
@@ -81,22 +72,84 @@ async function selectStudent(page,name){
     }
 }
 
-async function main(){
-    const browser = await puppeteer.launch({headless:false})
-    const page = await browser.newPage()
-    await login(page)
+async function enrollStudent(page,ou,name){
+    await page.goto(`https://${subdomain}.brightspace.com/d2l/lms/group/group_list.d2l?ou=${ou}`)
     await selectVirtualGathering(page)
     await page.click(sels.menuDropdown)
     await Promise.all([
         page.waitForNavigation(),
         page.click(sels.enrollUsers)
     ])
-    await selectStudent(page,"Scott")
+    await selectStudent(page,name)
     await Promise.all([
         page.waitForNavigation(),
         page.click(sels.save)
     ])
-//    await browser.close()
 }
 
-main()
+async function main(auth,data){
+    const browser = await puppeteer.launch({headless:false})
+    const page = await browser.newPage()
+    await login(page,auth)
+    for(var i = 0; i < data.length; i++){
+        await enrollStudent(page,data[i].ou,data[i].name)
+    }
+    await browser.close()
+}
+
+prompt.get([{
+    name: 'username',
+    description: 'cct username',
+    type: 'string',
+},{
+    name: 'password',
+    description: 'cct password',
+    type: 'string',
+    hidden: true,
+    message: 'please enter username and password',
+    conform: password => {
+        var username = prompt.history('username').value;
+        return (username && password) || fs.existsSync('auth.json')
+    }
+},{
+    name: 'courses',
+    description: 'csv containing courses ous',
+    message: 'Make sure path to csv is correct and has the headers code,id',
+    required: true,
+    conform: file => {
+        file = path.join(__dirname,file) 
+        if(fs.existsSync(file)){
+            let headers = d3.csvParse(fs.readFileSync(file,'utf-8')).columns
+            return ['code','id'].every(h => headers.includes(h))
+        } else {
+            return false
+        }
+    },
+},{
+    name: 'signups',
+    description: 'csv containing students tht need to be enrolled',
+    message: 'Make sure path to csv is correct and has the headers FIRST_NAME,LAST_NAME REFERENCE',
+    required: true,
+    conform: file => {
+        file = path.join(__dirname,file) 
+        if(fs.existsSync(file)){
+            let headers = d3.csvParse(fs.readFileSync(file,'utf-8')).columns
+            return ['FIRST_NAME','LAST_NAME','REFERENCE'].every(h => headers.includes(h))
+        } else {
+            return false
+        }
+    },
+}], (err, r) => {
+    let signups = d3.csvParse(fs.readFileSync(path.join(__dirname,r.signups),'utf-8'))
+    let courses = d3.csvParse(fs.readFileSync(path.join(__dirname,r.courses),'utf-8'))
+    let auth = r.username && r.password ? r : require('./auth.json')
+    let courseMap = courses.reduce((obj,course) => {
+        obj[course.code] = course.id; 
+        return obj
+    },{})
+    let data = signups.map(s => ({
+        name: s.FIRST_NAME + " " + s.LAST_NAME,
+        ou: courseMap[s.REFERENCE]
+    }))
+    main(auth,data)
+})
