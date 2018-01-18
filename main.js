@@ -3,8 +3,9 @@ const d3 = require('d3-dsv')
 const prompt = require('prompt')
 const fs = require('fs')
 const path = require('path')
+const errors = []
+var SUBDOMAIN
 
-const subdomain = 'byui'
 const sels = {
     loginUsername: "#userName",
     loginPassword: "#password",
@@ -27,7 +28,7 @@ const sels = {
 }
 
 async function login(page,auth){
-    await page.goto(`https://${subdomain}.brightspace.com/d2l/login?noredirect=true`)
+    await page.goto(`https://${SUBDOMAIN}.brightspace.com/d2l/login?noredirect=true`)
     await page.type(sels.loginUsername,auth.username),
     await page.type(sels.loginPassword,auth.password)
     await page.click(sels.loginButton)
@@ -73,7 +74,7 @@ async function selectStudent(page,name){
 }
 
 async function enrollStudent(page,ou,name){
-    await page.goto(`https://${subdomain}.brightspace.com/d2l/lms/group/group_list.d2l?ou=${ou}`)
+    await page.goto(`https://${SUBDOMAIN}.brightspace.com/d2l/lms/group/group_list.d2l?ou=${ou}`)
     await selectVirtualGathering(page)
     await page.click(sels.menuDropdown)
     await Promise.all([
@@ -92,12 +93,31 @@ async function main(auth,data){
     const page = await browser.newPage()
     await login(page,auth)
     for(var i = 0; i < data.length; i++){
-        await enrollStudent(page,data[i].ou,data[i].name)
+        try{
+            await enrollStudent(page,data[i].ou,data[i].name)
+        } catch (e){
+            errors.push({
+                error:e,
+                student:data[i].name,
+                course: data[i].courseName,
+            })
+        }
     }
     await browser.close()
+    
+    if(errors.length){
+        fs.writeFileSync('errors.csv',d3.csvFormat(errors))
+    }
 }
 
 prompt.get([{
+    name:"subdomain",
+    type:"string",
+    default: "pathway",
+    description: "subdomain",
+    message: "was not pathway or byui",
+    conform: d => ['pathway','byui'].includes(d)
+},{
     name: 'username',
     description: 'cct username',
     type: 'string',
@@ -140,6 +160,8 @@ prompt.get([{
         }
     },
 }], (err, r) => {
+    if(err) return console.error(err)
+    SUBDOMAIN = r.subdomain
     let signups = d3.csvParse(fs.readFileSync(path.join(__dirname,r.signups),'utf-8'))
     let courses = d3.csvParse(fs.readFileSync(path.join(__dirname,r.courses),'utf-8'))
     let auth = r.username && r.password ? r : require('./auth.json')
@@ -149,7 +171,8 @@ prompt.get([{
     },{})
     let data = signups.map(s => ({
         name: s.FIRST_NAME + " " + s.LAST_NAME,
-        ou: courseMap[s.REFERENCE]
+        ou: courseMap[s.REFERENCE],
+        courseName: s.REFERENCE
     }))
     main(auth,data)
 })
