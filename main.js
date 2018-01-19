@@ -3,7 +3,7 @@ const d3 = require('d3-dsv')
 const prompt = require('prompt')
 const fs = require('fs')
 const path = require('path')
-const errors = []
+const report = []
 var SUBDOMAIN
 
 const sels = {
@@ -63,7 +63,7 @@ async function selectStudent(page,name){
     ])
     let numResults = await page.$eval(sels.numResults, e => e.innerHTML)
     if(numResults != 1){
-        throw new Error(`Couldn't find ${name}`)
+        throw new Error(`Couldn't find ${name} or more than one`)
     }
     
     let isChecked = await page.$eval(sels.checkbox, checkbox => checkbox.checked)
@@ -71,6 +71,7 @@ async function selectStudent(page,name){
     if(!isChecked){
         await page.click(sels.checkbox)
     }
+    return isChecked
 }
 
 async function enrollStudent(page,ou,name){
@@ -81,11 +82,13 @@ async function enrollStudent(page,ou,name){
         page.waitForNavigation(),
         page.click(sels.enrollUsers)
     ])
-    await selectStudent(page,name)
+    // TODO: see what happens when multiple groups are present
+    let isChecked = await selectStudent(page,name)
     await Promise.all([
         page.waitForNavigation(),
         page.click(sels.save)
     ])
+    return isChecked
 }
 
 async function main(auth,data){
@@ -94,10 +97,15 @@ async function main(auth,data){
     await login(page,auth)
     for(var i = 0; i < data.length; i++){
         try{
-            await enrollStudent(page,data[i].ou,data[i].name)
+            let isChecked = await enrollStudent(page,data[i].ou,data[i].name)
+            report.push({
+                result: isChecked?"already checked":"success",
+                student: data[i].name,
+                course: data[i].courseName,
+            })
         } catch (e){
-            errors.push({
-                error:e,
+            report.push({
+                result:e,
                 student:data[i].name,
                 course: data[i].courseName,
             })
@@ -105,9 +113,8 @@ async function main(auth,data){
     }
     await browser.close()
     
-    if(errors.length){
-        fs.writeFileSync('errors.csv',d3.csvFormat(errors))
-    }
+    fs.writeFileSync('report.csv',d3.csvFormat(report))
+    console.log("file written")
 }
 
 prompt.get([{
@@ -139,7 +146,7 @@ prompt.get([{
     conform: file => {
         file = path.join(__dirname,file) 
         if(fs.existsSync(file)){
-            let headers = d3.csvParse(fs.readFileSync(file,'utf-8')).columns
+            let headers = d3.csvParse(fs.readFileSync(file,'utf8')).columns
             return ['code','id'].every(h => headers.includes(h))
         } else {
             return false
@@ -153,7 +160,7 @@ prompt.get([{
     conform: file => {
         file = path.join(__dirname,file) 
         if(fs.existsSync(file)){
-            let headers = d3.csvParse(fs.readFileSync(file,'utf-8')).columns
+            let headers = d3.csvParse(fs.readFileSync(file,'utf8')).columns
             return ['FIRST_NAME','LAST_NAME','REFERENCE'].every(h => headers.includes(h))
         } else {
             return false
@@ -162,8 +169,8 @@ prompt.get([{
 }], (err, r) => {
     if(err) return console.error(err)
     SUBDOMAIN = r.subdomain
-    let signups = d3.csvParse(fs.readFileSync(path.join(__dirname,r.signups),'utf-8'))
-    let courses = d3.csvParse(fs.readFileSync(path.join(__dirname,r.courses),'utf-8'))
+    let signups = d3.csvParse(fs.readFileSync(path.join(__dirname,r.signups),'utf8'))
+    let courses = d3.csvParse(fs.readFileSync(path.join(__dirname,r.courses),'utf8'))
     let auth = r.username && r.password ? r : require('./auth.json')
     let courseMap = courses.reduce((obj,course) => {
         obj[course.code] = course.id; 
