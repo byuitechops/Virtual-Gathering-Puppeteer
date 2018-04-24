@@ -3,3 +3,5 @@ auth.json
 *.csv
 *.tsv
 *.txt
+*.xlsx
+*.xls
