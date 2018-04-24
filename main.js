@@ -4,6 +4,8 @@ const prompt = require('prompt')
 const fs = require('fs')
 const path = require('path')
 const report = []
+var signUps;
+var coursesTop;
 var SUBDOMAIN
 
 const sels = {
@@ -57,10 +59,20 @@ async function selectVirtualGathering(page){
 }
 
 async function selectStudent(page,name){
+    //clean out the box first, if there are muntipule students in the same class then the next ones break because the previous persons name is in there
+
+    await page.evaluate(()=>document.querySelector('input[type=text]').value = "")
+    // type the name in
+    await page.type(sels.searchStudent,name),
+
+    //click search and wait for the page to load
     await Promise.all([
-        page.type(sels.searchStudent,name+'\n'),
-        page.waitForSelector(sels.numResults),
+        page.waitForNavigation(),
+        page.click('.vui-input-search-button')
     ])
+    
+    page.waitForSelector(sels.numResults)
+    
     let numResults = await page.$eval(sels.numResults, e => e.innerHTML)
     if(numResults != 1){
         throw new Error(`Couldn't find ${name} or more than one`)
@@ -94,6 +106,11 @@ async function enrollStudent(page,ou,name){
 async function main(auth,data){
     const browser = await puppeteer.launch({headless:false})
     const page = await browser.newPage()
+    var percent;
+    await page.setViewport({
+        width:1800,
+        height:900
+    });
     await login(page,auth)
     for(var i = 0; i < data.length; i++){
         try{
@@ -110,10 +127,19 @@ async function main(auth,data){
                 course: data[i].courseName,
             })
         }
+        
+        //make a pretty number
+        if(i === 0){
+            percent = 0;
+        } else {
+            percent = (i / data.length  * 100).toFixed(2);
+        }
+        
+        console.log(`${percent}% | OU:${data[i].ou} |${data[i].name} `)
     }
     await browser.close()
     
-    fs.writeFileSync('report.csv',d3.csvFormat(report))
+    fs.writeFileSync(`report-${Date.now()}.csv`,d3.csvFormat(report))
     console.log("file written")
 }
 
@@ -146,7 +172,9 @@ prompt.get([{
     conform: file => {
         file = path.join(__dirname,file) 
         if(fs.existsSync(file)){
-            let headers = d3.csvParse(fs.readFileSync(file,'utf8')).columns
+            coursesTop = d3.csvParse(fs.readFileSync(file,'utf8'));
+            let headers = coursesTop.columns;
+            
             return ['code','id'].every(h => headers.includes(h))
         } else {
             return false
@@ -160,7 +188,8 @@ prompt.get([{
     conform: file => {
         file = path.join(__dirname,file) 
         if(fs.existsSync(file)){
-            let headers = d3.csvParse(fs.readFileSync(file,'utf8')).columns
+            signUps = d3.tsvParse(fs.readFileSync(file,'utf16le'));
+            let headers = signUps.columns;
             return ['FIRST_NAME','LAST_NAME','REFERENCE'].every(h => headers.includes(h))
         } else {
             return false
@@ -169,8 +198,8 @@ prompt.get([{
 }], (err, r) => {
     if(err) return console.error(err)
     SUBDOMAIN = r.subdomain
-    let signups = d3.csvParse(fs.readFileSync(path.join(__dirname,r.signups),'utf8'))
-    let courses = d3.csvParse(fs.readFileSync(path.join(__dirname,r.courses),'utf8'))
+    let signups = signUps;
+    let courses = coursesTop;
     let auth = r.username && r.password ? r : require('./auth.json')
     let courseMap = courses.reduce((obj,course) => {
         obj[course.code] = course.id; 
