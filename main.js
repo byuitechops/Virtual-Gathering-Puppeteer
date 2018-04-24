@@ -119,12 +119,14 @@ async function main(auth,data){
                 result: isChecked?"already checked":"success",
                 student: data[i].name,
                 course: data[i].courseName,
+                ou: data[i].ou
             })
         } catch (e){
             report.push({
                 result:e,
                 student:data[i].name,
                 course: data[i].courseName,
+                ou: data[i].ou
             })
         }
         
