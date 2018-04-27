@@ -145,6 +145,7 @@ async function main(auth,data){
     console.log("file written")
 }
 
+
 prompt.get([{
     name:"subdomain",
     type:"string",
@@ -172,7 +173,8 @@ prompt.get([{
     message: 'Make sure path to csv is correct and has the headers code,id',
     required: true,
     conform: file => {
-        file = path.join(__dirname,file) 
+        file = path.resolve(__dirname,file) 
+        console.log('File tried:', file);
         if(fs.existsSync(file)){
             coursesTop = d3.csvParse(fs.readFileSync(file,'utf8'));
             let headers = coursesTop.columns;
@@ -188,7 +190,8 @@ prompt.get([{
     message: 'Make sure path to csv is correct and has the headers FIRST_NAME,LAST_NAME REFERENCE',
     required: true,
     conform: file => {
-        file = path.join(__dirname,file) 
+        file = path.resolve(__dirname,file) 
+        console.log('File tried:', file);
         if(fs.existsSync(file)){
             signUps = d3.tsvParse(fs.readFileSync(file,'utf16le'));
             let headers = signUps.columns;
